@@ -2,8 +2,6 @@ const express = require('express');
 const cors    = require('cors');
 const mysql   = require('mysql2/promise');
 const path    = require('path');
-const https   = require('https');
-const http    = require('http');
 const fs      = require('fs');
 const crypto  = require('crypto');
 
@@ -32,14 +30,14 @@ const pool = mysql.createPool({
 });
 
 // ============================================================
-// PRODUCTS API (WITHOUT /api PREFIX - FOR FRONTEND)
+// PRODUCTS API
 // ============================================================
 
 // GET all products
 app.get('/products', async (req, res) => {
   try {
     const [rows] = await pool.execute('SELECT * FROM products ORDER BY id DESC');
-    
+
     const formatted = rows.map(p => ({
       id: p.id.toString(),
       name: p.name,
@@ -50,8 +48,7 @@ app.get('/products', async (req, res) => {
       stock: p.stock || 0,
       isAvailable: p.is_available === 1
     }));
-    
-    console.log(`📦 GET /products - returning ${formatted.length} products`);
+
     res.json(formatted);
   } catch (err) {
     console.error('GET products error:', err);
@@ -63,21 +60,23 @@ app.get('/products', async (req, res) => {
 app.get('/products/:id', async (req, res) => {
   try {
     const [rows] = await pool.execute('SELECT * FROM products WHERE id = ?', [req.params.id]);
+
     if (rows.length === 0) {
       return res.status(404).json({ error: 'Product not found' });
     }
-    
+
     const p = rows[0];
     res.json({
       id: p.id.toString(),
       name: p.name,
-      description: p.description,
+      description: p.description || '',
       price: parseFloat(p.price),
-      category: p.category,
-      image: p.image,
-      stock: p.stock,
+      category: p.category || '',
+      image: p.image || '',
+      stock: p.stock || 0,
       isAvailable: p.is_available === 1
     });
+
   } catch (err) {
     console.error('GET product error:', err);
     res.status(500).json({ error: 'Failed to fetch product' });
@@ -88,24 +87,20 @@ app.get('/products/:id', async (req, res) => {
 app.post('/products', async (req, res) => {
   try {
     const { name, description, price, category, image, stock, isAvailable } = req.body;
-    
-    console.log('📦 POST /products - creating:', { name, price, category });
-    
+
     if (!name || !price) {
       return res.status(400).json({ error: 'Name and price are required' });
     }
-    
+
     const [result] = await pool.execute(
       `INSERT INTO products (name, description, price, category, image, stock, is_available) 
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [name, description || '', price, category || 'NBA Jersey', image || '', stock || 10, isAvailable !== false ? 1 : 0]
     );
-    
+
     const [newProduct] = await pool.execute('SELECT * FROM products WHERE id = ?', [result.insertId]);
     const p = newProduct[0];
-    
-    console.log('✅ Product created:', result.insertId);
-    
+
     res.status(201).json({
       id: p.id.toString(),
       name: p.name,
@@ -116,7 +111,7 @@ app.post('/products', async (req, res) => {
       stock: p.stock,
       isAvailable: p.is_available === 1
     });
-    
+
   } catch (err) {
     console.error('POST product error:', err);
     res.status(500).json({ error: 'Failed to create product' });
@@ -128,12 +123,10 @@ app.patch('/products/:id', async (req, res) => {
   try {
     const { name, description, price, category, image, stock, isAvailable } = req.body;
     const id = req.params.id;
-    
-    console.log('📦 PATCH /products - updating:', id);
-    
+
     const updates = [];
     const values = [];
-    
+
     if (name !== undefined) { updates.push('name = ?'); values.push(name); }
     if (description !== undefined) { updates.push('description = ?'); values.push(description); }
     if (price !== undefined) { updates.push('price = ?'); values.push(price); }
@@ -141,17 +134,18 @@ app.patch('/products/:id', async (req, res) => {
     if (image !== undefined) { updates.push('image = ?'); values.push(image); }
     if (stock !== undefined) { updates.push('stock = ?'); values.push(stock); }
     if (isAvailable !== undefined) { updates.push('is_available = ?'); values.push(isAvailable ? 1 : 0); }
-    
+
     if (updates.length === 0) {
       return res.status(400).json({ error: 'No fields to update' });
     }
-    
+
     values.push(id);
+
     await pool.execute(`UPDATE products SET ${updates.join(', ')} WHERE id = ?`, values);
-    
+
     const [updated] = await pool.execute('SELECT * FROM products WHERE id = ?', [id]);
     const p = updated[0];
-    
+
     res.json({
       id: p.id.toString(),
       name: p.name,
@@ -162,7 +156,7 @@ app.patch('/products/:id', async (req, res) => {
       stock: p.stock,
       isAvailable: p.is_available === 1
     });
-    
+
   } catch (err) {
     console.error('PATCH product error:', err);
     res.status(500).json({ error: 'Failed to update product' });
@@ -173,27 +167,25 @@ app.patch('/products/:id', async (req, res) => {
 app.delete('/products/:id', async (req, res) => {
   try {
     const id = req.params.id;
-    
-    console.log('📦 DELETE /products - deleting:', id);
-    
+
     const [result] = await pool.execute('DELETE FROM products WHERE id = ?', [id]);
-    
+
     if (result.affectedRows === 0) {
       return res.status(404).json({ error: 'Product not found' });
     }
-    
+
     res.json({ success: true, message: 'Product deleted' });
-    
+
   } catch (err) {
     console.error('DELETE product error:', err);
     res.status(500).json({ error: 'Failed to delete product' });
   }
 });
+
 // ============================================================
 // CART API
 // ============================================================
 
-// GET cart
 app.get('/api/cart', async (req, res) => {
   try {
     const [rows] = await pool.execute('SELECT * FROM cart');
@@ -212,7 +204,6 @@ app.get('/api/cart', async (req, res) => {
   }
 });
 
-// ADD to cart
 app.post('/api/cart', async (req, res) => {
   try {
     const { productId, name, price, quantity, image, category } = req.body;
@@ -229,7 +220,6 @@ app.post('/api/cart', async (req, res) => {
   }
 });
 
-// CLEAR cart
 app.delete('/api/cart', async (req, res) => {
   try {
     await pool.execute('DELETE FROM cart');
@@ -243,16 +233,9 @@ app.delete('/api/cart', async (req, res) => {
 // DELIVERY SERVICES API
 // ============================================================
 
-// ============================================================
-// DELIVERY SERVICES API - COMPLETE
-// ============================================================
-
-// GET all delivery services
 app.get('/delivery-services', async (req, res) => {
   try {
     const [rows] = await pool.execute('SELECT * FROM delivery_services WHERE is_available = 1 ORDER BY name ASC');
-    
-    console.log(`🚚 Returning ${rows.length} delivery services`);
     res.json(rows);
   } catch (err) {
     console.error('GET delivery-services error:', err);
@@ -260,13 +243,14 @@ app.get('/delivery-services', async (req, res) => {
   }
 });
 
-// GET delivery service by ID
 app.get('/delivery-services/:id', async (req, res) => {
   try {
     const [rows] = await pool.execute('SELECT * FROM delivery_services WHERE id = ?', [req.params.id]);
+
     if (rows.length === 0) {
       return res.status(404).json({ error: 'Delivery service not found' });
     }
+
     res.json(rows[0]);
   } catch (err) {
     console.error('GET delivery-service error:', err);
@@ -274,115 +258,107 @@ app.get('/delivery-services/:id', async (req, res) => {
   }
 });
 
-// CREATE delivery service
 app.post('/delivery-services', async (req, res) => {
   try {
     const { name, area, fee, estimatedTime, rider, isAvailable } = req.body;
-    
-    console.log('🚚 Creating delivery service:', { name, area, fee, rider });
-    
+
     if (!name || !area) {
       return res.status(400).json({ error: 'Name and area are required' });
     }
-    
+
     const [result] = await pool.execute(
       `INSERT INTO delivery_services (name, area, fee, estimated_time, rider, is_available) 
        VALUES (?, ?, ?, ?, ?, ?)`,
       [name, area, fee || 49, estimatedTime || '30-45 mins', rider || 'Unassigned', isAvailable !== false ? 1 : 0]
     );
-    
+
     const [newService] = await pool.execute('SELECT * FROM delivery_services WHERE id = ?', [result.insertId]);
-    
-    console.log('✅ Delivery service created:', result.insertId);
     res.status(201).json(newService[0]);
-    
+
   } catch (err) {
     console.error('POST delivery-services error:', err);
     res.status(500).json({ error: 'Failed to create delivery service' });
   }
 });
 
-// UPDATE delivery service
 app.patch('/delivery-services/:id', async (req, res) => {
   try {
     const { name, area, fee, estimatedTime, rider, isAvailable } = req.body;
     const id = req.params.id;
-    
+
     const updates = [];
     const values = [];
-    
+
     if (name !== undefined) { updates.push('name = ?'); values.push(name); }
     if (area !== undefined) { updates.push('area = ?'); values.push(area); }
     if (fee !== undefined) { updates.push('fee = ?'); values.push(fee); }
     if (estimatedTime !== undefined) { updates.push('estimated_time = ?'); values.push(estimatedTime); }
     if (rider !== undefined) { updates.push('rider = ?'); values.push(rider); }
     if (isAvailable !== undefined) { updates.push('is_available = ?'); values.push(isAvailable ? 1 : 0); }
-    
+
     if (updates.length === 0) {
       return res.status(400).json({ error: 'No fields to update' });
     }
-    
+
     values.push(id);
+
     await pool.execute(`UPDATE delivery_services SET ${updates.join(', ')} WHERE id = ?`, values);
-    
+
     const [updated] = await pool.execute('SELECT * FROM delivery_services WHERE id = ?', [id]);
-    
-    console.log('✅ Delivery service updated:', id);
     res.json(updated[0]);
-    
+
   } catch (err) {
     console.error('PATCH delivery-services error:', err);
     res.status(500).json({ error: 'Failed to update delivery service' });
   }
 });
 
-// DELETE delivery service
 app.delete('/delivery-services/:id', async (req, res) => {
   try {
     const id = req.params.id;
-    
+
     const [result] = await pool.execute('DELETE FROM delivery_services WHERE id = ?', [id]);
-    
+
     if (result.affectedRows === 0) {
       return res.status(404).json({ error: 'Delivery service not found' });
     }
-    
-    console.log('✅ Delivery service deleted:', id);
+
     res.json({ success: true, message: 'Delivery service deleted' });
-    
+
   } catch (err) {
     console.error('DELETE delivery-services error:', err);
     res.status(500).json({ error: 'Failed to delete delivery service' });
   }
 });
+
 // ============================================================
 // PAYMENT METHODS API
 // ============================================================
 
-// GET payment methods
 app.get('/api/payment-methods', async (req, res) => {
   try {
     const [rows] = await pool.execute('SELECT * FROM payment_methods WHERE id = 1');
+
     if (rows.length === 0) {
-      // Return default if not exists
       return res.json({ gcash: true, cod: true });
     }
-    res.json({ gcash: rows[0].gcash === 1, cod: rows[0].cod === 1 });
+
+    res.json({
+      gcash: rows[0].gcash === 1,
+      cod: rows[0].cod === 1
+    });
+
   } catch (err) {
-    console.error('GET payment-methods error:', err);
     res.json({ gcash: true, cod: true });
   }
 });
 
-// UPDATE payment methods
 app.patch('/api/payment-methods', async (req, res) => {
   try {
     const { gcash, cod } = req.body;
-    
-    console.log('💳 Updating payment methods:', { gcash, cod });
-    
+
     const [existing] = await pool.execute('SELECT id FROM payment_methods WHERE id = 1');
-    
+
     if (existing.length === 0) {
       await pool.execute(
         'INSERT INTO payment_methods (id, gcash, cod) VALUES (1, ?, ?)',
@@ -394,12 +370,10 @@ app.patch('/api/payment-methods', async (req, res) => {
         [gcash ? 1 : 0, cod ? 1 : 0]
       );
     }
-    
-    console.log('✅ Payment methods updated');
+
     res.json({ success: true, gcash, cod });
-    
+
   } catch (err) {
-    console.error('PATCH payment-methods error:', err);
     res.status(500).json({ error: 'Failed to update payment methods' });
   }
 });
@@ -412,38 +386,34 @@ app.patch('/api/payment-methods', async (req, res) => {
 app.post('/api/register', async (req, res) => {
   try {
     const { name, email, password } = req.body;
-    
-    console.log('📝 Registration attempt:', { name, email });
-    
+
     if (!name || !email || !password) {
       return res.status(400).json({ message: 'All fields are required' });
     }
-    
+
     if (password.length < 6) {
       return res.status(400).json({ message: 'Password must be at least 6 characters' });
     }
-    
+
     const [existing] = await pool.execute('SELECT id FROM users WHERE email = ?', [email]);
-    
+
     if (existing.length > 0) {
       return res.status(409).json({ message: 'Email already registered' });
     }
-    
+
     const hashedPassword = crypto.createHash('sha256').update(password).digest('hex');
-    
+
     const [result] = await pool.execute(
       'INSERT INTO users (name, email, password, role, created_at) VALUES (?, ?, ?, ?, NOW())',
-      [name, email, hashedPassword, 'user']
+      [name, email.toLowerCase(), hashedPassword, 'user']
     );
-    
-    console.log('✅ User registered:', { id: result.insertId, name, email });
-    
-    res.status(201).json({ 
-      success: true, 
+
+    res.status(201).json({
+      success: true,
       message: 'Registration successful',
       user: { id: result.insertId, name, email, role: 'user' }
     });
-    
+
   } catch (err) {
     console.error('Registration error:', err);
     res.status(500).json({ message: 'Server error during registration' });
@@ -454,41 +424,35 @@ app.post('/api/register', async (req, res) => {
 app.post('/api/login', async (req, res) => {
   try {
     const { email, password } = req.body;
-    
-    console.log('🔐 Login attempt:', { email });
-    
+
     if (!email || !password) {
       return res.status(400).json({ message: 'Email and password required' });
     }
-    
+
     const hashedPassword = crypto.createHash('sha256').update(password).digest('hex');
-    
+
     const [users] = await pool.execute(
       'SELECT id, name, email, role FROM users WHERE email = ? AND password = ?',
-      [email, hashedPassword]
+      [email.toLowerCase(), hashedPassword]
     );
-    
+
     if (users.length === 0) {
       return res.status(401).json({ message: 'Invalid email or password' });
     }
-    
+
     const user = users[0];
-    let role = user.role || 'user';
-    
-    // Hardcoded admin check
-    if (email === 'admin@hardpanel.com') {
-      role = 'admin';
-      await pool.execute('UPDATE users SET role = ? WHERE id = ?', ['admin', user.id]);
-    }
-    
-    console.log('✅ User logged in:', { id: user.id, name: user.name, email: user.email, role });
-    
-    res.json({ 
-      success: true, 
+
+    res.json({
+      success: true,
       message: 'Login successful',
-      user: { id: user.id, name: user.name, email: user.email, role: role }
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role
+      }
     });
-    
+
   } catch (err) {
     console.error('Login error:', err);
     res.status(500).json({ message: 'Server error during login' });
@@ -501,7 +465,6 @@ app.get('/api/users', async (req, res) => {
     const [users] = await pool.execute('SELECT id, name, email, role, created_at FROM users');
     res.json(users);
   } catch (err) {
-    console.error('Get users error:', err);
     res.status(500).json({ error: 'DB error' });
   }
 });
@@ -509,13 +472,18 @@ app.get('/api/users', async (req, res) => {
 // GET single user
 app.get('/api/users/:id', async (req, res) => {
   try {
-    const [users] = await pool.execute('SELECT id, name, email, role, created_at FROM users WHERE id = ?', [req.params.id]);
+    const [users] = await pool.execute(
+      'SELECT id, name, email, role, created_at FROM users WHERE id = ?',
+      [req.params.id]
+    );
+
     if (users.length === 0) {
       return res.status(404).json({ message: 'User not found' });
     }
+
     res.json({ user: users[0] });
+
   } catch (err) {
-    console.error('Get user error:', err);
     res.status(500).json({ error: 'DB error' });
   }
 });
@@ -525,23 +493,34 @@ app.put('/api/users/:id', async (req, res) => {
   try {
     const { name, email, phone } = req.body;
     const userId = req.params.id;
-    
+
     const [existing] = await pool.execute('SELECT id FROM users WHERE id = ?', [userId]);
     if (existing.length === 0) {
       return res.status(404).json({ message: 'User not found' });
     }
-    
-    const [emailTaken] = await pool.execute('SELECT id FROM users WHERE email = ? AND id != ?', [email, userId]);
+
+    const [emailTaken] = await pool.execute(
+      'SELECT id FROM users WHERE email = ? AND id != ?',
+      [email, userId]
+    );
+
     if (emailTaken.length > 0) {
       return res.status(409).json({ message: 'Email already taken' });
     }
-    
-    await pool.execute('UPDATE users SET name = ?, email = ? WHERE id = ?', [name, email, userId]);
-    
-    const [users] = await pool.execute('SELECT id, name, email, created_at FROM users WHERE id = ?', [userId]);
+
+    await pool.execute(
+      'UPDATE users SET name = ?, email = ?, phone = ? WHERE id = ?',
+      [name, email.toLowerCase(), phone || null, userId]
+    );
+
+    const [users] = await pool.execute(
+      'SELECT id, name, email, role, phone, created_at FROM users WHERE id = ?',
+      [userId]
+    );
+
     res.json({ user: users[0] });
+
   } catch (err) {
-    console.error('Update user error:', err);
     res.status(500).json({ error: 'Update failed' });
   }
 });
@@ -550,14 +529,16 @@ app.put('/api/users/:id', async (req, res) => {
 app.delete('/api/users/:id', async (req, res) => {
   try {
     const userId = req.params.id;
+
     const [result] = await pool.execute('DELETE FROM users WHERE id = ?', [userId]);
-    
+
     if (result.affectedRows === 0) {
       return res.status(404).json({ message: 'User not found' });
     }
+
     res.json({ success: true, message: 'User deleted successfully' });
+
   } catch (err) {
-    console.error('Delete user error:', err);
     res.status(500).json({ error: 'Delete failed' });
   }
 });
@@ -566,28 +547,36 @@ app.delete('/api/users/:id', async (req, res) => {
 app.post('/api/change-password', async (req, res) => {
   try {
     const { userId, currentPassword, newPassword } = req.body;
-    
+
     if (!userId || !currentPassword || !newPassword) {
       return res.status(400).json({ message: 'All fields are required' });
     }
-    
+
     if (newPassword.length < 6) {
       return res.status(400).json({ message: 'New password must be at least 6 characters' });
     }
-    
+
     const hashedCurrent = crypto.createHash('sha256').update(currentPassword).digest('hex');
-    
-    const [users] = await pool.execute('SELECT id FROM users WHERE id = ? AND password = ?', [userId, hashedCurrent]);
+
+    const [users] = await pool.execute(
+      'SELECT id FROM users WHERE id = ? AND password = ?',
+      [userId, hashedCurrent]
+    );
+
     if (users.length === 0) {
       return res.status(401).json({ message: 'Current password is incorrect' });
     }
-    
+
     const hashedNew = crypto.createHash('sha256').update(newPassword).digest('hex');
-    await pool.execute('UPDATE users SET password = ? WHERE id = ?', [hashedNew, userId]);
-    
+
+    await pool.execute(
+      'UPDATE users SET password = ? WHERE id = ?',
+      [hashedNew, userId]
+    );
+
     res.json({ success: true, message: 'Password updated successfully' });
+
   } catch (err) {
-    console.error('Change password error:', err);
     res.status(500).json({ error: 'Password change failed' });
   }
 });
@@ -605,7 +594,7 @@ app.get('/', (req, res) => {
 });
 
 // ============================================================
-// INIT DATABASE
+// INIT DATABASE + AUTO CREATE ADMIN
 // ============================================================
 
 async function initDB() {
@@ -682,26 +671,11 @@ async function initDB() {
       )
     `);
 
-    // Seed products if empty
-    const [productCount] = await conn.execute('SELECT COUNT(*) AS cnt FROM products');
-    if (productCount[0].cnt === 0) {
-      const jerseys = [
-        { name: 'Lakers LeBron James Jersey', price: 2499, category: 'Lakers', image: 'https://images.unsplash.com/photo-1600180758890-6b94519a8ba8?w=400' },
-        { name: 'Warriors Stephen Curry Jersey', price: 2499, category: 'Warriors', image: 'https://images.unsplash.com/photo-1599058917765-a780eda07a3e?w=400' },
-        { name: 'Bulls Michael Jordan Jersey', price: 2799, category: 'Bulls', image: 'https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?w=400' },
-        { name: 'Celtics Jayson Tatum Jersey', price: 2399, category: 'Celtics', image: 'https://images.unsplash.com/photo-1546519638-68e109498ffc?w=400' },
-        { name: 'Nets Kevin Durant Jersey', price: 2599, category: 'Nets', image: 'https://images.unsplash.com/photo-1600180758891-6b94519a8ba8?w=400' },
-        { name: 'Bucks Giannis Jersey', price: 2599, category: 'Bucks', image: 'https://images.unsplash.com/photo-1599058917765-a780eda07a3e?w=400' }
-      ];
-
-      for (const p of jerseys) {
-        await conn.execute(
-          `INSERT INTO products (name, description, price, category, image, stock, is_available) 
-           VALUES (?, 'Official NBA jersey', ?, ?, ?, 10, 1)`,
-          [p.name, p.price, p.category, p.image]
-        );
-      }
-      console.log("🏀 Seeded sample products");
+    // Seed payment methods if empty
+    const [paymentCount] = await conn.execute('SELECT COUNT(*) AS cnt FROM payment_methods');
+    if (paymentCount[0].cnt === 0) {
+      await conn.execute(`INSERT INTO payment_methods (id, gcash, cod) VALUES (1, 1, 1)`);
+      console.log('💳 Seeded payment methods');
     }
 
     // Seed delivery services if empty
@@ -716,11 +690,54 @@ async function initDB() {
       console.log('🏍️ Seeded delivery services');
     }
 
-    // Seed payment methods if empty
-    const [paymentCount] = await conn.execute('SELECT COUNT(*) AS cnt FROM payment_methods');
-    if (paymentCount[0].cnt === 0) {
-      await conn.execute(`INSERT INTO payment_methods (id, gcash, cod) VALUES (1, 1, 1)`);
-      console.log('💳 Seeded payment methods');
+    // Seed products if empty
+    const [productCount] = await conn.execute('SELECT COUNT(*) AS cnt FROM products');
+    if (productCount[0].cnt === 0) {
+      const jerseys = [
+        { name: 'Lakers LeBron James Jersey', price: 2499, category: 'Lakers', image: 'https://images.unsplash.com/photo-1600180758890-6b94519a8ba8?w=400' },
+        { name: 'Warriors Stephen Curry Jersey', price: 2499, category: 'Warriors', image: 'https://images.unsplash.com/photo-1599058917765-a780eda07a3e?w=400' },
+        { name: 'Bulls Michael Jordan Jersey', price: 2799, category: 'Bulls', image: 'https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?w=400' },
+        { name: 'Celtics Jayson Tatum Jersey', price: 2399, category: 'Celtics', image: 'https://images.unsplash.com/photo-1546519638-68e109498ffc?w=400' }
+      ];
+
+      for (const p of jerseys) {
+        await conn.execute(
+          `INSERT INTO products (name, description, price, category, image, stock, is_available) 
+           VALUES (?, 'Official NBA jersey', ?, ?, ?, 10, 1)`,
+          [p.name, p.price, p.category, p.image]
+        );
+      }
+
+      console.log("🏀 Seeded sample products");
+    }
+
+    // =====================================================
+    // AUTO CREATE ADMIN ACCOUNT
+    // =====================================================
+    const adminEmail = 'admin@hardpanel.com';
+    const adminPassword = 'admin123';
+    const hashedAdminPassword = crypto.createHash('sha256').update(adminPassword).digest('hex');
+
+    const [adminExists] = await conn.execute(
+      'SELECT id FROM users WHERE email = ?',
+      [adminEmail]
+    );
+
+    if (adminExists.length === 0) {
+      await conn.execute(
+        'INSERT INTO users (name, email, password, role, created_at) VALUES (?, ?, ?, ?, NOW())',
+        ['Admin', adminEmail, hashedAdminPassword, 'admin']
+      );
+
+      console.log('👑 ADMIN ACCOUNT CREATED!');
+      console.log(`👑 Email: ${adminEmail}`);
+      console.log(`👑 Password: ${adminPassword}`);
+    } else {
+      await conn.execute(
+        'UPDATE users SET role = ? WHERE email = ?',
+        ['admin', adminEmail]
+      );
+      console.log('👑 Admin already exists. Role ensured as admin.');
     }
 
     console.log("✅ Database ready");
@@ -735,14 +752,7 @@ async function initDB() {
 // ── START SERVER ────────────────────────────
 initDB().then(() => {
   app.listen(PORT, () => {
-    console.log(`\n🚀 API running at http://localhost:${PORT}`);
-    console.log(`📦 Products: GET /api/products | POST /api/products | PATCH /api/products/:id | DELETE /api/products/:id`);
-    console.log(`🛒 Cart: GET /api/cart | POST /api/cart | DELETE /api/cart`);
-    console.log(`🚚 Delivery: GET /api/delivery-services | POST /api/delivery-services | PATCH /api/delivery-services/:id | DELETE /api/delivery-services/:id`);
-    console.log(`💳 Payment: GET /api/payment-methods | PATCH /api/payment-methods`);
-    console.log(`👤 Auth: POST /api/register | POST /api/login`);
-    console.log(`👥 Users: GET /api/users | GET /api/users/:id | PUT /api/users/:id | DELETE /api/users/:id`);
-    console.log(`🔐 Password: POST /api/change-password`);
-    console.log(`❤️ Health: GET /health\n`);
+    console.log(`\n🚀 API running on PORT ${PORT}`);
+    console.log(`❤️ Health: GET /health`);
   });
 });
